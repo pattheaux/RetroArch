@@ -1658,7 +1658,6 @@ bool rarch_environment_cb(unsigned cmd, void *data)
          ledintf->set_led_state = led_driver_set_led;
       }
       
-      /* Default */
       default:
          RARCH_LOG("Environ UNSUPPORTED (#%u).\n", cmd);
          return false;
