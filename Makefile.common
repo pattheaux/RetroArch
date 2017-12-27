@@ -1580,7 +1580,3 @@ endif
 ifeq ($(HAVE_RPILED), 1)
    OBJ += led/rpi_led_driver.o
 endif
-
-ifeq ($(HAVE_RPILED), 1)
-   OBJ += led/rpi_led_driver.o
-endif

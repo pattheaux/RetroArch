@@ -1,0 +1,1 @@
+./configure --prefix="/opt/retropie/emulators/retroarch" --disable-sdl --enable-sdl2 --disable-oss --disable-al --disable-jack --disable-x11 --disable-ffmpeg --disable-pulse --enable-opengles --enable-dispmanx --enable-floathard --enable-neon
