@@ -34,7 +34,7 @@ static int set_gpio(int gpio,int value)
 {
     FILE *fp;
     char buf[256];
-    sprintf(buf,"/sys/class/gpio/%d/value",gpio);
+    sprintf(buf,"/sys/class/gpio/gpio%d/value",gpio);
     fp = fopen(buf,"w");
     if(fp == NULL)
     {
@@ -50,7 +50,7 @@ static int set_gpio(int gpio,int value)
 static int setup_gpio(int gpio) {
     FILE *fp;
     char buf[256];
-    sprintf(buf,"/sys/class/gpio/%d/direction",gpio);
+    sprintf(buf,"/sys/class/gpio/gpio%d/direction",gpio);
     fp = fopen(buf,"w");
     if(fp == NULL) {
         sprintf(buf,"/sys/class/gpio/export");
@@ -63,7 +63,7 @@ static int setup_gpio(int gpio) {
         fprintf(fp,"%d\n",gpio);
         fclose(fp);
 
-        sprintf(buf,"/sys/class/gpio/%d/direction",gpio);
+        sprintf(buf,"/sys/class/gpio/gpio%d/direction",gpio);
         fp = fopen(buf,"w");    
     }
     if(fp == NULL)
