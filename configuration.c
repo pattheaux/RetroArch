@@ -3132,11 +3132,11 @@ static bool config_load_file(global_t *global,
 
       snprintf(buf, sizeof(buf), "input_player%u_combine_into", i + 1);
       CONFIG_GET_INT_BASE(conf, settings, uints.input_combine_into[i], buf);
-      RARCH_LOG("combine port %d into port %d",i+1,settings->uints.input_combine_into[i]);
+      RARCH_DBG("combine port %d into port %d",i+1,settings->uints.input_combine_into[i]);
 
       into = settings->uints.input_combine_into[i];
       if((into > 0) && (into < MAX_USERS+1)) {
-         RARCH_LOG("combine port %d into port %d",i+1,into);
+         RARCH_DBG("combine port %d into port %d",i+1,into);
          /* append to the combine_from array */
          for(int j=0;j<MAX_USERS-2;j++) {
             if(settings->uints.input_combine_from[into-1][j] == 0) {
@@ -4638,9 +4638,6 @@ bool input_remapping_load_file(void *data, const char *path)
 
       snprintf(s1, sizeof(s1), "input_libretro_device_p%u", i + 1);
       CONFIG_GET_INT_BASE(conf, settings, uints.input_libretro_device[i], s1);
-
-      snprintf(s1, sizeof(s1), "input_player%u_combine_into", i + 1);
-      CONFIG_GET_INT_BASE(conf, settings, uints.input_combine_into[i], s1);
    }
 
    return true;
@@ -4743,8 +4740,6 @@ bool input_remapping_save_file(const char *path)
       config_set_int(conf, s1, input_config_get_device(i));
       snprintf(s1, sizeof(s1), "input_player%u_analog_dpad_mode", i + 1);
       config_set_int(conf, s1, settings->uints.input_analog_dpad_mode[i]);
-      snprintf(s1, sizeof(s1), "input_player%u_combine_into", i + 1);
-      config_set_int(conf, s1, settings->uints.input_combine_into[i]);
    }
 
    ret = config_file_write(conf, remap_file, true);
