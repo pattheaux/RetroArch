@@ -2171,6 +2171,14 @@ MSG_HASH(
    "menu_screensaver_timeout"
    )
 MSG_HASH(
+   MENU_ENUM_LABEL_MENU_SCREENSAVER_ANIMATION,
+   "menu_screensaver_animation"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_MENU_SCREENSAVER_ANIMATION_SPEED,
+   "menu_screensaver_animation_speed"
+   )
+MSG_HASH(
    MENU_ENUM_LABEL_PERFCNT_ENABLE,
    "perfcnt_enable"
    )
@@ -4139,6 +4147,10 @@ MSG_HASH(
 MSG_HASH(
    MENU_ENUM_LABEL_MENU_RGUI_FULL_WIDTH_LAYOUT,
    "menu_rgui_full_width_layout"
+   )
+MSG_HASH(
+   MENU_ENUM_LABEL_MENU_RGUI_TRANSPARENCY,
+   "menu_rgui_transparency"
    )
 MSG_HASH(
    MENU_ENUM_LABEL_MENU_RGUI_SHADOWS,

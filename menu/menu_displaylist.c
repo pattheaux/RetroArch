@@ -79,6 +79,9 @@
 #include "menu_shader.h"
 #endif
 #include "menu_dialog.h"
+#if defined(HAVE_MATERIALUI) || defined(HAVE_XMB) || defined(HAVE_OZONE)
+#include "menu_screensaver.h"
+#endif
 
 #include "../configuration.h"
 #include "../file_path_special.h"
@@ -128,30 +131,38 @@
 struct menu_displaylist_state
 {
    enum msg_hash_enums new_type;
+   enum filebrowser_enums filebrowser_types;
    char new_path_entry[4096];
    char new_lbl_entry[4096];
    char new_entry[4096];
 };
 
-static struct menu_displaylist_state menu_displist_st;
-/* TODO/FIXME - static public global variables */
-static enum filebrowser_enums filebrowser_types = FILEBROWSER_NONE;
+static struct menu_displaylist_state menu_displist_st = {
+   MSG_UNKNOWN,      /* new_type */
+   FILEBROWSER_NONE, /* filebrowser_types */
+   {'\0'},           /* new_path_entry */
+   {'\0'},           /* new_lbl_entry */
+   {'\0'},           /* new_entry */
+};
 
 extern struct key_desc key_descriptors[RARCH_MAX_KEYS];
 
 enum filebrowser_enums filebrowser_get_type(void)
 {
-   return filebrowser_types;
+   struct menu_displaylist_state *p_displist = &menu_displist_st;
+   return p_displist->filebrowser_types;
 }
 
 void filebrowser_clear_type(void)
 {
-   filebrowser_types = FILEBROWSER_NONE;
+   struct menu_displaylist_state *p_displist = &menu_displist_st;
+   p_displist->filebrowser_types = FILEBROWSER_NONE;
 }
 
 void filebrowser_set_type(enum filebrowser_enums type)
 {
-   filebrowser_types = type;
+   struct menu_displaylist_state *p_displist = &menu_displist_st;
+   p_displist->filebrowser_types = type;
 }
 
 static void filebrowser_parse(
@@ -164,21 +175,20 @@ static void filebrowser_parse(
       )
 {
    size_t i, list_size;
-   const struct retro_subsystem_info *subsystem;
-   bool ret                             = false;
-   struct string_list str_list          = {0};
-   unsigned items_found                 = 0;
-   unsigned files_count                 = 0;
-   unsigned dirs_count                  = 0;
-   enum menu_displaylist_ctl_state type = (enum menu_displaylist_ctl_state)
-                                          type_data;
-   const char *path                     = info->path;
-   bool path_is_compressed              = !string_is_empty(path)
-      ? path_is_compressed_file(path) : false;
+   const struct retro_subsystem_info *subsystem = NULL;
+   bool ret                                     = false;
+   struct string_list str_list                  = {0};
+   unsigned items_found                         = 0;
+   enum menu_displaylist_ctl_state type         = (enum menu_displaylist_ctl_state)type_data;
+   enum filebrowser_enums filebrowser_type      = filebrowser_get_type();
+   const char *path                             = info->path;
+   bool path_is_compressed                      = !string_is_empty(path) ?
+         path_is_compressed_file(path) : false;
+   menu_serch_terms_t *search_terms             = menu_entries_search_get_terms();
 
    if (path_is_compressed)
    {
-      if (filebrowser_types == FILEBROWSER_SELECT_FILE_SUBSYSTEM)
+      if (filebrowser_type == FILEBROWSER_SELECT_FILE_SUBSYSTEM)
       {
          rarch_system_info_t *system          = runloop_get_system_info();
          /* Core fully loaded, use the subsystem data */
@@ -208,7 +218,7 @@ static void filebrowser_parse(
                msg_hash_to_str(MENU_ENUM_LABEL_SCAN_FILE)))
          filter_ext = false;
 
-      if (filebrowser_types == FILEBROWSER_SELECT_FILE_SUBSYSTEM)
+      if (filebrowser_type == FILEBROWSER_SELECT_FILE_SUBSYSTEM)
       {
          rarch_system_info_t *system          = runloop_get_system_info();
          /* Core fully loaded, use the subsystem data */
@@ -233,7 +243,7 @@ static void filebrowser_parse(
                true, show_hidden_files, true, false);
    }
 
-   switch (filebrowser_types)
+   switch (filebrowser_type)
    {
       case FILEBROWSER_SCAN_DIR:
 #ifdef HAVE_LIBRETRODB
@@ -281,28 +291,56 @@ static void filebrowser_parse(
    {
       for (i = 0; i < list_size; i++)
       {
-         char label[64];
-         enum msg_hash_enums 
-            enum_idx                   = MSG_UNKNOWN;
-         enum rarch_content_type 
-            path_type                  = RARCH_CONTENT_NONE;
-         enum msg_file_type file_type  = FILE_TYPE_NONE;
-         const char *path              = str_list.elems[i].data;
+         enum msg_hash_enums enum_idx      = MSG_UNKNOWN;
+         enum rarch_content_type path_type = RARCH_CONTENT_NONE;
+         enum msg_file_type file_type      = FILE_TYPE_NONE;
+         const char *file_path             = str_list.elems[i].data;
 
-         label[0] = '\0';
+         if (string_is_empty(file_path))
+            continue;
+
+         if ((str_list.elems[i].attr.i != RARCH_DIRECTORY) &&
+             ((filebrowser_type == FILEBROWSER_SELECT_DIR) ||
+              (filebrowser_type == FILEBROWSER_SCAN_DIR)   ||
+              (filebrowser_type == FILEBROWSER_MANUAL_SCAN_DIR)))
+            continue;
+
+         if (!path_is_compressed)
+         {
+            file_path = path_basename_nocompression(file_path);
+            if (string_is_empty(file_path))
+               continue;
+         }
+
+         /* Check whether entry matches search terms,
+          * if required */
+         if (search_terms)
+         {
+            bool skip_entry = false;
+            size_t j;
+
+            for (j = 0; j < search_terms->size; j++)
+            {
+               const char *search_term = search_terms->terms[j];
+
+               if (!string_is_empty(search_term) &&
+                   !strcasestr(file_path, search_term))
+               {
+                  skip_entry = true;
+                  break;
+               }
+            }
+
+            if (skip_entry)
+               continue;
+         }
 
          switch (str_list.elems[i].attr.i)
          {
             case RARCH_DIRECTORY:
                file_type = FILE_TYPE_DIRECTORY;
-
-               /* Need to preserve slash first time. */
-               if (!string_is_empty(path) && !path_is_compressed)
-                  path = path_basename(path);
-
-               dirs_count++;
                items_found++;
-               menu_entries_append_enum(info->list, path, label,
+               menu_entries_append_enum(info->list, file_path, "",
                      MENU_ENUM_LABEL_FILE_BROWSER_DIRECTORY,
                      file_type, 0, 0);
                continue;
@@ -314,7 +352,7 @@ static void filebrowser_parse(
                break;
             case RARCH_PLAIN_FILE:
             default:
-               if (filebrowser_types == FILEBROWSER_SELECT_VIDEO_FONT)
+               if (filebrowser_type == FILEBROWSER_SELECT_VIDEO_FONT)
                   file_type = FILE_TYPE_VIDEO_FONT;
                else
                   file_type = (enum msg_file_type)info->type_default;
@@ -324,7 +362,7 @@ static void filebrowser_parse(
                    * every archive as an archive to disallow instant loading
                    */
                   case DISPLAYLIST_CORES_DETECTED:
-                     if (path_is_compressed_file(path))
+                     if (path_is_compressed_file(file_path))
                         file_type = FILE_TYPE_CARCHIVE;
                      break;
                   default:
@@ -333,27 +371,15 @@ static void filebrowser_parse(
                break;
          }
 
-         if (
-               (filebrowser_types == FILEBROWSER_SELECT_DIR) ||
-               (filebrowser_types == FILEBROWSER_SCAN_DIR)   ||
-               (filebrowser_types == FILEBROWSER_MANUAL_SCAN_DIR)
-            )
-            continue;
+         path_type = path_is_media_type(file_path);
 
-         /* Need to preserve slash first time. */
-         if (!string_is_empty(path) && !path_is_compressed)
-            path = path_basename(path);
-
-         path_type                         = path_is_media_type(path);
-
-         if (filebrowser_types == FILEBROWSER_SELECT_COLLECTION)
+         if (filebrowser_type == FILEBROWSER_SELECT_COLLECTION)
             file_type = FILE_TYPE_PLAYLIST_COLLECTION;
 
          if (path_type == RARCH_CONTENT_MUSIC)
             file_type = FILE_TYPE_MUSIC;
-         else if (
-               builtin_mediaplayer_enable ||
-               builtin_imageviewer_enable)
+         else if (builtin_mediaplayer_enable ||
+                  builtin_imageviewer_enable)
          {
             switch (path_type)
             {
@@ -371,7 +397,7 @@ static void filebrowser_parse(
                   else
                      file_type = FILE_TYPE_IMAGE;
 #endif
-                  if (filebrowser_types == FILEBROWSER_SELECT_IMAGE)
+                  if (filebrowser_type == FILEBROWSER_SELECT_IMAGE)
                      file_type = FILE_TYPE_IMAGE;
                   break;
                default:
@@ -381,33 +407,26 @@ static void filebrowser_parse(
 
          switch (file_type)
          {
-            case FILE_TYPE_PLAIN:
-               files_count++;
-               break;
             case FILE_TYPE_MOVIE:
                enum_idx = MENU_ENUM_LABEL_FILE_BROWSER_MOVIE_OPEN;
-               files_count++;
                break;
             case FILE_TYPE_MUSIC:
                enum_idx = MENU_ENUM_LABEL_FILE_BROWSER_MUSIC_OPEN;
-               files_count++;
                break;
             case FILE_TYPE_IMAGE:
                enum_idx = MENU_ENUM_LABEL_FILE_BROWSER_IMAGE;
-               files_count++;
                break;
             case FILE_TYPE_IMAGEVIEWER:
                enum_idx = MENU_ENUM_LABEL_FILE_BROWSER_IMAGE_OPEN_WITH_VIEWER;
-               files_count++;
                break;
+            case FILE_TYPE_PLAIN:
             default:
                break;
          }
 
          items_found++;
-         menu_entries_append_enum(info->list, path, label,
-               enum_idx,
-               file_type, 0, 0);
+         menu_entries_append_enum(info->list, file_path, "",
+               enum_idx, file_type, 0, 0);
       }
    }
 
@@ -1483,7 +1502,7 @@ static int menu_displaylist_parse_playlist(menu_displaylist_info_t *info,
    size_t           list_size        = playlist_size(playlist);
    bool show_inline_core_name        = false;
    const char *menu_driver           = menu_driver_ident();
-   struct string_list *search_terms  = menu_driver_search_get_terms();
+   menu_serch_terms_t *search_terms  = menu_entries_search_get_terms();
    unsigned pl_show_inline_core_name = settings->uints.playlist_show_inline_core_name;
    bool pl_show_sublabels            = settings->bools.playlist_show_sublabels;
    void (*sanitization)(char*);
@@ -1635,7 +1654,7 @@ static int menu_displaylist_parse_playlist(menu_displaylist_info_t *info,
 
          for (j = 0; j < search_terms->size; j++)
          {
-            const char *search_term = search_terms->elems[j].data;
+            const char *search_term = search_terms->terms[j];
 
             if (!string_is_empty(search_term) &&
                 !strcasestr(menu_entry_label, search_term))
@@ -2420,7 +2439,7 @@ static void menu_displaylist_set_new_playlist(
       const char *path, bool sort_enabled)
 {
    playlist_config_t playlist_config;
-   const char *playlist_file_name      = path_basename(path);
+   const char *playlist_file_name      = path_basename_nocompression(path);
    int content_favorites_size          = settings->ints.content_favorites_size;
    unsigned content_history_size       = settings->uints.content_history_size;
    bool playlist_sort_alphabetical     = settings->bools.playlist_sort_alphabetical;
@@ -2936,7 +2955,7 @@ static int menu_displaylist_parse_horizontal_content_actions(
 
                      if (!string_is_empty(playlist_path))
                      {
-                        const char *playlist_file = path_basename(playlist_path);
+                        const char *playlist_file = path_basename_nocompression(playlist_path);
 
                         if (!string_is_empty(playlist_file))
                            remove_entry_enabled = string_is_equal(playlist_file, FILE_PATH_CONTENT_HISTORY) ||
@@ -3259,7 +3278,7 @@ static unsigned menu_displaylist_parse_playlists(
       if (string_is_empty(path))
          continue;
 
-      playlist_file = path_basename(path);
+      playlist_file = path_basename_nocompression(path);
 
       if (string_is_empty(playlist_file))
          continue;
@@ -3405,7 +3424,7 @@ static unsigned menu_displaylist_parse_cores(
       path = str_list->elems[i].data;
 
       if (!string_is_empty(path))
-         path = path_basename(path);
+         path = path_basename_nocompression(path);
 
 #ifndef HAVE_DYNAMIC
       if (frontend_driver_has_fork())
@@ -3514,7 +3533,7 @@ static unsigned menu_displaylist_parse_playlist_manager_list(
          if (string_is_empty(path))
             continue;
 
-         playlist_file = path_basename(path);
+         playlist_file = path_basename_nocompression(path);
 
          if (string_is_empty(playlist_file))
             continue;
@@ -3589,7 +3608,7 @@ static bool menu_displaylist_parse_playlist_manager_settings(
    if (string_is_empty(playlist_path))
       return false;
 
-   playlist_file = path_basename(playlist_path);
+   playlist_file = path_basename_nocompression(playlist_path);
 
    if (string_is_empty(playlist_file))
       return false;
@@ -3725,18 +3744,17 @@ static unsigned menu_displaylist_parse_pl_thumbnail_download_list(
       for (i = 0; i < str_list->size; i++)
       {
          char path_base[PATH_MAX_LENGTH];
-         const char *path                 =
-            path_basename(str_list->elems[i].data);
+         const char *path;
 
          path_base[0] = '\0';
 
          if (str_list->elems[i].attr.i == FILE_TYPE_DIRECTORY)
             continue;
 
-         if (string_is_empty(path))
-            continue;
+         path = path_basename(str_list->elems[i].data);
 
-         if (!string_is_equal_noncase(path_get_extension(path),
+         if (      string_is_empty(path)
+               || !string_is_equal_noncase(path_get_extension(path),
                   "lpl"))
             continue;
 
@@ -5102,7 +5120,8 @@ static unsigned menu_displaylist_populate_subsystem(
                   for (j = 0; j < content_get_subsystem_rom_id(); j++)
                   {
                      strlcat(rom_buff,
-                           path_basename(content_get_subsystem_rom(j)), sizeof(rom_buff));
+                           path_basename(content_get_subsystem_rom(j)),
+                           sizeof(rom_buff));
                      if (j != content_get_subsystem_rom_id() - 1)
                         strlcat(rom_buff, "|", sizeof(rom_buff));
                   }
@@ -7298,8 +7317,14 @@ unsigned menu_displaylist_build_list(
          break;         
       case DISPLAYLIST_USER_INTERFACE_SETTINGS_LIST:
          {
-            bool kiosk_mode_enable    = settings->bools.kiosk_mode_enable;
-            bool desktop_menu_enable  = settings->bools.desktop_menu_enable;
+            bool kiosk_mode_enable                                  = settings->bools.kiosk_mode_enable;
+            bool desktop_menu_enable                                = settings->bools.desktop_menu_enable;
+            bool menu_screensaver_supported                         = menu_driver_screensaver_supported();
+#if defined(HAVE_MATERIALUI) || defined(HAVE_XMB) || defined(HAVE_OZONE)
+            enum menu_screensaver_effect menu_screensaver_animation =
+                  (enum menu_screensaver_effect)settings->uints.menu_screensaver_animation;
+#endif
+
             menu_displaylist_build_info_selective_t build_list[] = {
                {MENU_ENUM_LABEL_MENU_VIEWS_SETTINGS,                                   PARSE_ACTION,      true},
                {MENU_ENUM_LABEL_MENU_SETTINGS,                                         PARSE_ACTION,      true},
@@ -7314,6 +7339,8 @@ unsigned menu_displaylist_build_list(
                {MENU_ENUM_LABEL_MENU_INSERT_DISK_RESUME,                               PARSE_ONLY_BOOL,   true},
                {MENU_ENUM_LABEL_QUIT_ON_CLOSE_CONTENT,                                 PARSE_ONLY_UINT,   true},
                {MENU_ENUM_LABEL_MENU_SCREENSAVER_TIMEOUT,                              PARSE_ONLY_UINT,   false},
+               {MENU_ENUM_LABEL_MENU_SCREENSAVER_ANIMATION,                            PARSE_ONLY_UINT,   false},
+               {MENU_ENUM_LABEL_MENU_SCREENSAVER_ANIMATION_SPEED,                      PARSE_ONLY_FLOAT,  false},
                {MENU_ENUM_LABEL_MOUSE_ENABLE,                                          PARSE_ONLY_BOOL,   true},
                {MENU_ENUM_LABEL_POINTER_ENABLE,                                        PARSE_ONLY_BOOL,   true},
                {MENU_ENUM_LABEL_THREADED_DATA_RUNLOOP_ENABLE,                          PARSE_ONLY_BOOL,   true},
@@ -7336,9 +7363,20 @@ unsigned menu_displaylist_build_list(
                         build_list[i].checked = true;
                      break;
                   case MENU_ENUM_LABEL_MENU_SCREENSAVER_TIMEOUT:
-                     if (menu_driver_screensaver_supported())
+                     if (menu_screensaver_supported)
                         build_list[i].checked = true;
                      break;
+#if defined(HAVE_MATERIALUI) || defined(HAVE_XMB) || defined(HAVE_OZONE)
+                  case MENU_ENUM_LABEL_MENU_SCREENSAVER_ANIMATION:
+                     if (menu_screensaver_supported)
+                        build_list[i].checked = true;
+                     break;
+                  case MENU_ENUM_LABEL_MENU_SCREENSAVER_ANIMATION_SPEED:
+                     if (menu_screensaver_supported &&
+                         (menu_screensaver_animation != MENU_SCREENSAVER_BLANK))
+                        build_list[i].checked = true;
+                     break;
+#endif
                   case MENU_ENUM_LABEL_UI_COMPANION_TOGGLE:
                      if (desktop_menu_enable)
                         build_list[i].checked = true;
@@ -8835,6 +8873,7 @@ unsigned menu_displaylist_build_list(
             bool menu_materialui_icons_enable          = settings->bools.menu_materialui_icons_enable;
             bool menu_materialui_show_nav_bar          = settings->bools.menu_materialui_show_nav_bar;
             bool menu_use_preferred_system_color_theme = settings->bools.menu_use_preferred_system_color_theme;
+            unsigned menu_rgui_color_theme             = settings->uints.menu_rgui_color_theme;
             unsigned menu_rgui_particle_effect         = settings->uints.menu_rgui_particle_effect;
             unsigned menu_screensaver_timeout          = settings->uints.menu_screensaver_timeout;
 
@@ -8857,7 +8896,8 @@ unsigned menu_displaylist_build_list(
                {MENU_ENUM_LABEL_MENU_XMB_ANIMATION_MOVE_UP_DOWN,              PARSE_ONLY_UINT,   true},
                {MENU_ENUM_LABEL_MENU_XMB_ANIMATION_OPENING_MAIN_MENU,         PARSE_ONLY_UINT,   true},
                {MENU_ENUM_LABEL_RGUI_MENU_COLOR_THEME,                        PARSE_ONLY_UINT,   true},
-               {MENU_ENUM_LABEL_RGUI_MENU_THEME_PRESET,                       PARSE_ONLY_PATH,   true},
+               {MENU_ENUM_LABEL_RGUI_MENU_THEME_PRESET,                       PARSE_ONLY_PATH,   false},
+               {MENU_ENUM_LABEL_MENU_RGUI_TRANSPARENCY,                       PARSE_ONLY_BOOL,   false},
                {MENU_ENUM_LABEL_MENU_RGUI_SHADOWS,                            PARSE_ONLY_BOOL,   true},
                {MENU_ENUM_LABEL_MENU_RGUI_PARTICLE_EFFECT,                    PARSE_ONLY_UINT,   true},
                {MENU_ENUM_LABEL_MENU_RGUI_PARTICLE_EFFECT_SPEED,              PARSE_ONLY_FLOAT,  false},
@@ -8913,6 +8953,14 @@ unsigned menu_displaylist_build_list(
                {
                   case MENU_ENUM_LABEL_MENU_XMB_ANIMATION_HORIZONTAL_HIGHLIGHT:
                      if (menu_horizontal_animation)
+                        build_list[i].checked = true;
+                     break;
+                  case MENU_ENUM_LABEL_RGUI_MENU_THEME_PRESET:
+                     if (menu_rgui_color_theme == RGUI_THEME_CUSTOM)
+                        build_list[i].checked = true;
+                     break;
+                  case MENU_ENUM_LABEL_MENU_RGUI_TRANSPARENCY:
+                     if (menu_rgui_color_theme != RGUI_THEME_CUSTOM)
                         build_list[i].checked = true;
                      break;
                   case MENU_ENUM_LABEL_MENU_RGUI_PARTICLE_EFFECT_SPEED:
@@ -10354,7 +10402,7 @@ bool menu_displaylist_ctl(enum menu_displaylist_ctl_state type,
 #ifdef HAVE_NETWORKING
          {
             core_updater_list_t *core_list   = core_updater_list_get_cached();
-            struct string_list *search_terms = menu_driver_search_get_terms();
+            menu_serch_terms_t *search_terms = menu_entries_search_get_terms();
             bool show_experimental_cores     = settings->bools.network_buildbot_show_experimental_cores;
             size_t selection                 = menu_navigation_get_selection();
 
@@ -10387,7 +10435,7 @@ bool menu_displaylist_ctl(enum menu_displaylist_ctl_state type,
 
                         for (j = 0; j < search_terms->size; j++)
                         {
-                           const char *search_term = search_terms->elems[j].data;
+                           const char *search_term = search_terms->terms[j];
 
                            if (!string_is_empty(search_term) &&
                                !string_is_empty(entry->display_name) &&
@@ -12053,7 +12101,7 @@ bool menu_displaylist_ctl(enum menu_displaylist_ctl_state type,
          {
             menu_displaylist_parse_playlist_generic(menu, info,
                   settings,
-                  path_basename(info->path),
+                  path_basename_nocompression(info->path),
                   info->path,
                   true, /* Is a collection */
                   true, /* Enable sorting (if allowed by user config) */
@@ -13180,27 +13228,25 @@ bool menu_displaylist_ctl(enum menu_displaylist_ctl_state type,
       }
       else
       {
-         const char  *pending_selection = menu_driver_get_pending_selection();
-         bool show_hidden_files         = settings->bools.show_hidden_files;
+         const char *pending_selection              = menu_driver_get_pending_selection();
+         bool show_hidden_files                     = settings->bools.show_hidden_files;
          bool multimedia_builtin_mediaplayer_enable = settings->bools.multimedia_builtin_mediaplayer_enable;
          bool multimedia_builtin_imageviewer_enable = settings->bools.multimedia_builtin_imageviewer_enable;
-         bool menu_navigation_browser_filter_supported_extensions_enable = settings->bools.menu_navigation_browser_filter_supported_extensions_enable;
+         bool filter_supported_extensions_enable    = settings->bools.menu_navigation_browser_filter_supported_extensions_enable;
 
          filebrowser_parse(info, type,
                show_hidden_files,
                multimedia_builtin_mediaplayer_enable,
                multimedia_builtin_imageviewer_enable,
-               menu_navigation_browser_filter_supported_extensions_enable
+               filter_supported_extensions_enable
                );
 
          /* Apply pending selection */
          if (!string_is_empty(pending_selection))
          {
-            size_t selection_idx           = 0;
-            file_list_t *selection_buf     = menu_entries_get_selection_buf_ptr(0);
+            size_t selection_idx = 0;
 
-            if (selection_buf &&
-                file_list_search(selection_buf, pending_selection, &selection_idx))
+            if (menu_entries_list_search(pending_selection, &selection_idx))
             {
                menu_navigation_set_selection(selection_idx);
                menu_driver_navigation_set(true);

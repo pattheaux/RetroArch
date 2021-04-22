@@ -1666,6 +1666,7 @@ static struct config_bool_setting *populate_settings_bool(
    SETTING_BOOL("rgui_background_filler_thickness_enable", &settings->bools.menu_rgui_background_filler_thickness_enable, true, true, false);
    SETTING_BOOL("rgui_border_filler_thickness_enable",     &settings->bools.menu_rgui_border_filler_thickness_enable, true, true, false);
    SETTING_BOOL("rgui_border_filler_enable",               &settings->bools.menu_rgui_border_filler_enable, true, true, false);
+   SETTING_BOOL("menu_rgui_transparency",                  &settings->bools.menu_rgui_transparency, true, DEFAULT_RGUI_TRANSPARENCY, false);
    SETTING_BOOL("menu_rgui_shadows",                       &settings->bools.menu_rgui_shadows, true, rgui_shadows, false);
    SETTING_BOOL("menu_rgui_full_width_layout",             &settings->bools.menu_rgui_full_width_layout, true, rgui_full_width_layout, false);
    SETTING_BOOL("rgui_inline_thumbnails",                  &settings->bools.menu_rgui_inline_thumbnails, true, rgui_inline_thumbnails, false);
@@ -1839,6 +1840,9 @@ static struct config_float_setting *populate_settings_float(
    SETTING_FLOAT("menu_header_opacity",      &settings->floats.menu_header_opacity,    true, menu_header_opacity, false);
    SETTING_FLOAT("menu_ticker_speed",        &settings->floats.menu_ticker_speed,      true, menu_ticker_speed,   false);
    SETTING_FLOAT("rgui_particle_effect_speed", &settings->floats.menu_rgui_particle_effect_speed, true, DEFAULT_RGUI_PARTICLE_EFFECT_SPEED, false);
+#if defined(HAVE_MATERIALUI) || defined(HAVE_XMB) || defined(HAVE_OZONE)
+   SETTING_FLOAT("menu_screensaver_animation_speed", &settings->floats.menu_screensaver_animation_speed, true, DEFAULT_MENU_SCREENSAVER_ANIMATION_SPEED, false);
+#endif
 #endif
    SETTING_FLOAT("video_message_pos_x",      &settings->floats.video_msg_pos_x,      true, message_pos_offset_x, false);
    SETTING_FLOAT("video_message_pos_y",      &settings->floats.video_msg_pos_y,      true, message_pos_offset_y, false);
@@ -1932,6 +1936,9 @@ static struct config_uint_setting *populate_settings_uint(
    SETTING_UINT("menu_scroll_delay",            &settings->uints.menu_scroll_delay, true, DEFAULT_MENU_SCROLL_DELAY, false);
    SETTING_UINT("content_show_add_entry",       &settings->uints.menu_content_show_add_entry, true, DEFAULT_MENU_CONTENT_SHOW_ADD_ENTRY, false);
    SETTING_UINT("menu_screensaver_timeout",     &settings->uints.menu_screensaver_timeout, true, DEFAULT_MENU_SCREENSAVER_TIMEOUT, false);
+#if defined(HAVE_MATERIALUI) || defined(HAVE_XMB) || defined(HAVE_OZONE)
+   SETTING_UINT("menu_screensaver_animation",   &settings->uints.menu_screensaver_animation, true, DEFAULT_MENU_SCREENSAVER_ANIMATION, false);
+#endif
 #ifdef HAVE_RGUI
    SETTING_UINT("rgui_menu_color_theme",        &settings->uints.menu_rgui_color_theme, true, DEFAULT_RGUI_COLOR_THEME, false);
    SETTING_UINT("rgui_thumbnail_downscaler",    &settings->uints.menu_rgui_thumbnail_downscaler, true, rgui_thumbnail_downscaler, false);
@@ -2357,7 +2364,8 @@ void config_set_defaults(void *data)
 
    input_config_reset();
 #ifdef HAVE_CONFIGFILE
-   input_remapping_set_defaults(true);
+   input_remapping_deinit();
+   input_remapping_set_defaults();
 #endif
 
    /* Verify that binds are in proper order. */
@@ -3791,7 +3799,7 @@ bool config_load_remap(const char *directory_input_remapping,
          sizeof(game_path));
 
 #ifdef HAVE_CONFIGFILE
-   input_remapping_set_defaults(false);
+   input_remapping_set_defaults();
 #endif
 
    /* If a game remap file exists, load it. */
@@ -3965,23 +3973,11 @@ bool config_save_autoconf_profile(const
    fill_pathname_join(buf, autoconf_dir, joypad_driver, sizeof(buf));
 
    if (path_is_directory(buf))
-   {
-      char buf_new[PATH_MAX_LENGTH];
-
-      buf_new[0] = '\0';
-
-      fill_pathname_join(buf_new, buf,
-            sanitised_name, sizeof(buf_new));
-      fill_pathname_noext(autoconf_file,
-            buf_new, ".cfg", sizeof(autoconf_file));
-   }
+      fill_pathname_join_concat(autoconf_file, buf,
+            sanitised_name, ".cfg", sizeof(autoconf_file));
    else
-   {
-      fill_pathname_join(buf, autoconf_dir,
-            sanitised_name, sizeof(buf));
-      fill_pathname_noext(autoconf_file,
-            buf, ".cfg", sizeof(autoconf_file));
-   }
+      fill_pathname_join_concat(autoconf_file, autoconf_dir,
+            sanitised_name, ".cfg", sizeof(autoconf_file));
 
    /* Open config file */
    conf = config_file_new_from_path_to_string(autoconf_file);
@@ -4555,7 +4551,10 @@ bool input_remapping_load_file(void *data, const char *path)
       return false;
 
    if (!string_is_empty(global->name.remapfile))
-      input_remapping_set_defaults(true);
+   {
+      input_remapping_deinit();
+      input_remapping_set_defaults();
+   }
    global->name.remapfile = strdup(path);
 
    for (i = 0; i < MAX_USERS; i++)
@@ -4655,7 +4654,6 @@ bool input_remapping_save_file(const char *path)
 {
    bool ret;
    unsigned i, j;
-   char buf[PATH_MAX_LENGTH];
    char remap_file[PATH_MAX_LENGTH];
    char key_strings[RARCH_FIRST_CUSTOM_BIND + 8][8] = {
       "b", "y", "select", "start",
@@ -4667,11 +4665,11 @@ bool input_remapping_save_file(const char *path)
    settings_t              *settings = config_get_ptr();
    const char *dir_input_remapping   = settings->paths.directory_input_remapping;
 
-   buf[0] = remap_file[0]            = '\0';
+   remap_file[0]                     = '\0';
 
-   fill_pathname_join(buf, dir_input_remapping, path, sizeof(buf));
-   fill_pathname_noext(remap_file, buf,
-         FILE_PATH_REMAP_EXTENSION, sizeof(remap_file));
+   fill_pathname_join_concat(remap_file, dir_input_remapping, path, 
+         FILE_PATH_REMAP_EXTENSION,
+         sizeof(remap_file));
 
    if (!(conf = config_file_new_from_path_to_string(remap_file)))
    {
@@ -4691,48 +4689,58 @@ bool input_remapping_save_file(const char *path)
       snprintf(s2, sizeof(s2), "input_player%u_key", i + 1);
       snprintf(s3, sizeof(s3), "input_player%u_stk", i + 1);
 
-      for (j = 0; j < RARCH_FIRST_CUSTOM_BIND + 8; j++)
+      for (j = 0; j < RARCH_FIRST_CUSTOM_BIND; j++)
       {
+         char btn_ident[128];
          unsigned remap_id      = settings->uints.input_remap_ids[i][j];
          unsigned keymap_id     = settings->uints.input_keymapper_ids[i][j];
          const char *key_string = key_strings[j];
-         
-         if (j < RARCH_FIRST_CUSTOM_BIND)
-         {
-            char btn_ident[128], key_ident[128];
-            btn_ident[0] = key_ident[0] = '\0';
-            fill_pathname_join_delim(btn_ident, s1,
+         btn_ident[0]           = '\0';
+         fill_pathname_join_delim(btn_ident, s1,
                key_string, '_', sizeof(btn_ident));
-            fill_pathname_join_delim(key_ident, s2,
-               key_string, '_', sizeof(key_ident));
 
-            /* only save values that have been modified */
-            if (remap_id != j && remap_id != RARCH_UNMAPPED)
-               config_set_int(conf, btn_ident,
-                     settings->uints.input_remap_ids[i][j]);
-            else if (remap_id != j && remap_id == RARCH_UNMAPPED)
-               config_set_int(conf, btn_ident, -1);
-            else
-               config_unset(conf, btn_ident);
-
-            if (keymap_id != RETROK_UNKNOWN)
-               config_set_int(conf, key_ident,
-                  settings->uints.input_keymapper_ids[i][j]);
-         }
+         /* only save values that have been modified */
+         if (remap_id == j)
+            config_unset(conf, btn_ident);
          else
          {
-            char stk_ident[128];
-            stk_ident[0] = '\0';
-            fill_pathname_join_delim(stk_ident, s3,
+            if (remap_id == RARCH_UNMAPPED)
+               config_set_int(conf, btn_ident, -1);
+            else
+               config_set_int(conf, btn_ident,
+                     settings->uints.input_remap_ids[i][j]);
+         }
+
+         if (keymap_id != RETROK_UNKNOWN)
+         {
+            char key_ident[128];
+            key_ident[0] = '\0';
+            fill_pathname_join_delim(key_ident, s2,
+                  key_string, '_', sizeof(key_ident));
+            config_set_int(conf, key_ident,
+                  settings->uints.input_keymapper_ids[i][j]);
+         }
+      }
+
+      for (j = RARCH_FIRST_CUSTOM_BIND; j < (RARCH_FIRST_CUSTOM_BIND + 8); j++)
+      {
+         char stk_ident[128];
+         unsigned remap_id      = settings->uints.input_remap_ids[i][j];
+         const char *key_string = key_strings[j];
+         stk_ident[0]           = '\0';
+         fill_pathname_join_delim(stk_ident, s3,
                key_string, '_', sizeof(stk_ident));
-            if (remap_id != j && remap_id != RARCH_UNMAPPED)
-               config_set_int(conf, stk_ident,
-                  settings->uints.input_remap_ids[i][j]);
-            else if (remap_id != j && remap_id == RARCH_UNMAPPED)
+
+         if (remap_id == j)
+            config_unset(conf, stk_ident);
+         else
+         {
+            if (remap_id == RARCH_UNMAPPED)
                config_set_int(conf, stk_ident,
                      -1);
             else
-               config_unset(conf, stk_ident);
+               config_set_int(conf, stk_ident,
+                     settings->uints.input_remap_ids[i][j]);
          }
       }
 
@@ -4751,64 +4759,12 @@ bool input_remapping_save_file(const char *path)
 bool input_remapping_remove_file(const char *path,
       const char *dir_input_remapping)
 {
-   char buf[PATH_MAX_LENGTH];
    char remap_file[PATH_MAX_LENGTH];
-   buf[0] = remap_file[0]  = '\0';
-
-   fill_pathname_join(buf, dir_input_remapping, path, sizeof(buf));
-   fill_pathname_noext(remap_file, buf,
+   remap_file[0]  = '\0';
+   fill_pathname_join_concat(remap_file, dir_input_remapping, path,
          FILE_PATH_REMAP_EXTENSION,
          sizeof(remap_file));
-
    return filestream_delete(remap_file) == 0 ? true : false;
-}
-
-void input_remapping_set_defaults(bool deinit)
-{
-   unsigned i, j;
-   settings_t *settings = config_get_ptr();
-   global_t     *global = global_get_ptr();
-
-   if (!global)
-      return;
-
-   if (deinit)
-   {
-      if (!string_is_empty(global->name.remapfile))
-         free(global->name.remapfile);
-      global->name.remapfile = NULL;
-      rarch_ctl(RARCH_CTL_UNSET_REMAPS_CORE_ACTIVE, NULL);
-      rarch_ctl(RARCH_CTL_UNSET_REMAPS_CONTENT_DIR_ACTIVE, NULL);
-      rarch_ctl(RARCH_CTL_UNSET_REMAPS_GAME_ACTIVE, NULL);
-   }
-
-   for (i = 0; i < MAX_USERS; i++)
-   {
-      for (j = 0; j < RARCH_FIRST_CUSTOM_BIND + 8; j++)
-      {
-         if (j < RARCH_FIRST_CUSTOM_BIND)
-         {
-            const struct  retro_keybind *keybind = &input_config_binds[i][j];
-            if (keybind)
-               configuration_set_uint(settings,
-                     settings->uints.input_remap_ids[i][j], keybind->id);
-            configuration_set_uint(settings,
-                  settings->uints.input_keymapper_ids[i][j], RETROK_UNKNOWN);
-         }
-         else
-            configuration_set_uint(settings,
-                  settings->uints.input_remap_ids[i][j], j);
-      }
-
-      if (global->old_analog_dpad_mode[i])
-         configuration_set_uint(settings,
-               settings->uints.input_analog_dpad_mode[i],
-               global->old_analog_dpad_mode[i]);
-      if (global->old_libretro_device[i])
-         configuration_set_uint(settings,
-               settings->uints.input_libretro_device[i],
-               global->old_libretro_device[i]);
-   }
 }
 #endif
 
